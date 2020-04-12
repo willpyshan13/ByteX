@@ -9,6 +9,7 @@ import com.ss.android.ugc.bytex.common.BaseContext;
 import com.ss.android.ugc.bytex.common.ByteXExtension;
 import com.ss.android.ugc.bytex.common.CommonTransform;
 import com.ss.android.ugc.bytex.common.IPlugin;
+import com.ss.android.ugc.bytex.common.configuration.BooleanProperty;
 import com.ss.android.ugc.bytex.transformer.TransformContext;
 
 import org.gradle.api.Project;
@@ -25,7 +26,7 @@ public class ProxyTransform extends CommonTransform<BaseContext> {
     private final Transform origTransform;
 
     ProxyTransform(Project project, AppExtension android, String transformName, Transform origTransform) {
-        super(new BaseContext(project, android, new ByteXExtension() {
+        super(new BaseContext<ByteXExtension>(project, android, new ByteXExtension() {
             @Override
             public String getName() {
                 return "hook";
@@ -37,17 +38,7 @@ public class ProxyTransform extends CommonTransform<BaseContext> {
 
     @Override
     protected TransformContext getTransformContext(TransformInvocation transformInvocation) {
-        return new TransformContext(transformInvocation, context.getProject(), context.getAndroid(), isIncremental(), shouldSaveCache()) {
-            @Override
-            public File getOutputFile(QualifiedContent content) throws IOException {
-                return content.getFile();
-            }
-
-            @Override
-            public File getOutputFile(QualifiedContent content, boolean createIfNeed) throws IOException {
-                return content.getFile();
-            }
-        };
+        return new ProxyTransformContext(transformInvocation, context.getProject(), context.getAndroid(), isIncremental(), shouldSaveCache());
     }
 
     @Override
@@ -80,5 +71,22 @@ public class ProxyTransform extends CommonTransform<BaseContext> {
     @Override
     public Set<? super QualifiedContent.Scope> getScopes() {
         return origTransform.getScopes();
+    }
+
+    private static class ProxyTransformContext extends TransformContext {
+
+        ProxyTransformContext(TransformInvocation invocation, Project project, AppExtension android, boolean isIncremental, boolean shouldSaveCache) {
+            super(invocation, project, android, isIncremental, shouldSaveCache, BooleanProperty.ENABLE_RAM_CACHE.value());
+        }
+
+        @Override
+        public File getOutputFile(QualifiedContent content) throws IOException {
+            return content.getFile();
+        }
+
+        @Override
+        public File getOutputFile(QualifiedContent content, boolean createIfNeed) throws IOException {
+            return content.getFile();
+        }
     }
 }

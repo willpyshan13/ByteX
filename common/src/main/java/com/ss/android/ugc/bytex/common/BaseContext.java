@@ -1,6 +1,7 @@
 package com.ss.android.ugc.bytex.common;
 
 import com.android.build.gradle.AppExtension;
+import com.ss.android.ugc.bytex.common.configuration.BooleanProperty;
 import com.ss.android.ugc.bytex.common.graph.Graph;
 import com.ss.android.ugc.bytex.common.log.ILogger;
 import com.ss.android.ugc.bytex.common.log.Impl.FileLoggerImpl;
@@ -16,19 +17,15 @@ import org.gradle.api.logging.LogLevel;
 import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Paths;
-import java.util.List;
+import java.util.function.Supplier;
 
 public class BaseContext<E extends BaseExtension> {
     protected final Project project;
     protected final AppExtension android;
     public final E extension;
     private ILogger logger;
-    private HtmlLoggerImpl htmlLog;
     private Graph classGraph;
     private File logFile;
-    private boolean hasInitialized;
     private TransformContext transformContext;
 
     public BaseContext(Project project, AppExtension android, E extension) {
@@ -38,13 +35,7 @@ public class BaseContext<E extends BaseExtension> {
     }
 
     public void init() {
-        if (hasInitialized) {
-            return;
-        }
-        hasInitialized = true;
-        //init logger
-        getLogger().d("init");
-        HtmlReporter.getInstance().registerHtmlFragment(htmlLog);
+        getLogger().i("init");
     }
 
     private String getSdkJarDir() {
@@ -69,63 +60,53 @@ public class BaseContext<E extends BaseExtension> {
     }
 
     public final ILogger getLogger() {
-        if (logger == null) {
+        if (logger == null || logFile == null || !logFile.exists()) {
             synchronized (this) {
-                if (logger == null) {
-                    ILogger fileLog;
+                //忽略线程安全
+                if (logger == null || logFile == null || !logFile.exists()) {
+                    logFile = new File(buildDir(), extension.getLogFile());
+                    logFile.delete();
+                    Supplier<HtmlLoggerImpl> htmlLoggerSupplier = () -> {
+                        if (BooleanProperty.ENABLE_HTML_LOG.value()) {
+                            return new HtmlLoggerImpl(extension.getName());
+                        } else {
+                            return null;
+                        }
+                    };
+                    HtmlLoggerImpl htmlLogger = logger == null ? htmlLoggerSupplier.get() :
+                            ((LogDistributor) ((LevelLog) logger).getImpl()).getLoggers()
+                                    .stream()
+                                    .filter(iLogger -> iLogger instanceof HtmlLoggerImpl)
+                                    .map(iLogger -> (HtmlLoggerImpl) iLogger)
+                                    .findFirst()
+                                    .orElseGet(htmlLoggerSupplier);
+                    ILogger fileLogger;
                     try {
-                        String fileName = String.join(File.separator, buildDir().getAbsolutePath(), extension.getLogFile());
-                        Files.deleteIfExists(Paths.get(fileName));
-                        logFile = new File(fileName);
-                        fileLog = FileLoggerImpl.of(fileName);
+                        fileLogger = FileLoggerImpl.of(logFile.getAbsolutePath());
                     } catch (IOException e) {
                         throw new RuntimeException("can not create log file", e);
                     }
-                    htmlLog = new HtmlLoggerImpl(extension.getName());
                     LogDistributor logDistributor = new LogDistributor();
-                    logDistributor.addLogger(fileLog);
-                    logDistributor.addLogger(htmlLog);
+                    logDistributor.addLogger(fileLogger);
+                    if (htmlLogger != null) {
+                        htmlLogger.acceptAllCachedLog((logLevel, tag, msg, throwable) -> {
+                            if (logLevel == LogLevel.DEBUG) {
+                                fileLogger.d(tag, msg);
+                            } else if (logLevel == LogLevel.INFO) {
+                                fileLogger.i(tag, msg);
+                            } else if (logLevel == LogLevel.WARN) {
+                                fileLogger.w(tag, msg, throwable);
+                            } else if (logLevel == LogLevel.ERROR) {
+                                fileLogger.e(tag, msg, throwable);
+                            }
+                        });
+                        logDistributor.addLogger(htmlLogger);
+                        HtmlReporter.getInstance().registerHtmlFragment(htmlLogger);
+                    }
                     LevelLog levelLog = new LevelLog(logDistributor);
                     levelLog.setLevel(extension.getLogLevel());
                     levelLog.setTag(extension.getName());
                     logger = levelLog;
-                }
-            }
-        }
-        if (!logFile.exists()) {
-            //be deleted? bad case.get cached logs and write to logfile
-            synchronized (this) {
-                if (!logFile.exists()) {
-                    //ignore ClassCastException
-                    LogDistributor logDistributor = (LogDistributor) ((LevelLog) logger).getImpl();
-                    List<ILogger> loggers = logDistributor.getLoggers();
-                    loggers.stream().filter(it -> it instanceof HtmlLoggerImpl).findFirst().ifPresent(hlog -> {
-                        final HtmlLoggerImpl htmlLog = (HtmlLoggerImpl) hlog;
-                        //lock htmllogger
-                        synchronized (htmlLog) {
-                            loggers.stream().filter(it -> it instanceof FileLoggerImpl).map(flog -> {
-                                try {
-                                    ((FileLoggerImpl) flog).redirectLogFile(logFile.getAbsolutePath());
-                                    return flog;
-                                } catch (IOException e) {
-                                    throw new RuntimeException("can not create log file", e);
-                                }
-                            }).forEach(flog -> {
-                                //ignore level
-                                htmlLog.acceptAllCachedLog((logLevel, tag, msg, throwable) -> {
-                                    if (logLevel == LogLevel.DEBUG) {
-                                        flog.d(tag, msg);
-                                    } else if (logLevel == LogLevel.INFO) {
-                                        flog.i(tag, msg);
-                                    } else if (logLevel == LogLevel.WARN) {
-                                        flog.w(tag, msg, throwable);
-                                    } else if (logLevel == LogLevel.ERROR) {
-                                        flog.e(tag, msg, throwable);
-                                    }
-                                });
-                            });
-                        }
-                    });
                 }
             }
         }
@@ -145,7 +126,19 @@ public class BaseContext<E extends BaseExtension> {
     }
 
     void setTransformContext(TransformContext transformContext) {
+        if (transformContext == null) {
+            this.transformContext = null;
+            return;
+        }
+        if (this.transformContext != null && this.transformContext != transformContext) {
+            throw new IllegalStateException("transformContext configured twice");
+        }
         this.transformContext = transformContext;
+        if (logFile != null && !logFile.getAbsolutePath().equals(new File(buildDir(), extension.getLogFile()).getAbsolutePath())) {
+            logFile.delete();
+            logFile = null;
+            getLogger().i("rebuild logger");
+        }
     }
 
     public Project getProject() {

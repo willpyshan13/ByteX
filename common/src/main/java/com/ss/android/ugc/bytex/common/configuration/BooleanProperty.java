@@ -6,7 +6,11 @@ import com.android.annotations.NonNull;
  * Created by tanlehua on 2019/4/23.
  */
 public enum BooleanProperty implements Property<Boolean> {
-    ENABLE_DUPLICATE_CLASS_CHECK("bytex.enableDuplicateClassCheck", true);
+    ENABLE_DUPLICATE_CLASS_CHECK("bytex.enableDuplicateClassCheck", true),
+    ENABLE_HTML_LOG("bytex.enableHtmlLog", true),
+    ENABLE_RAM_CACHE("bytex.enableRAMCache", true),
+    ENABLE_ASYNC_CACHE("bytex.asyncSaveCache", true),
+    ENABLE_VERIFY_PROGUARD_CONFIGURATION_CHANGED("bytex.verifyProguardConfigurationChanged", true);
 
     @NonNull
     private final String propertyName;
