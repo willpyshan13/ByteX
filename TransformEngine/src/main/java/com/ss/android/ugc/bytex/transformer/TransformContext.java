@@ -12,7 +12,6 @@ import com.ss.android.ugc.bytex.transformer.cache.DirCache;
 import com.ss.android.ugc.bytex.transformer.cache.FileCache;
 import com.ss.android.ugc.bytex.transformer.cache.FileData;
 import com.ss.android.ugc.bytex.transformer.cache.JarCache;
-import com.ss.android.ugc.bytex.transformer.cache.NewFileCache;
 import com.ss.android.ugc.bytex.transformer.io.ClassFinder;
 import com.ss.android.ugc.bytex.transformer.io.ClassNodeLoader;
 import com.ss.android.ugc.bytex.transformer.location.Locator;
@@ -27,7 +26,6 @@ import java.io.IOException;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Stream;
 
 import javax.annotation.Nonnull;
@@ -45,7 +43,7 @@ public class TransformContext implements GradleEnv, ClassFinder {
     private File graphCacheFile;
     private String temporaryDirName;
     private ClassFinder finder;
-    private final AtomicBoolean running = new AtomicBoolean(false);
+    private State state = State.STATELESS;
 
     public TransformContext(TransformInvocation invocation, Project project, AppExtension android, boolean isPluginIncremental) {
         this(invocation, project, android, isPluginIncremental, true);
@@ -120,14 +118,32 @@ public class TransformContext implements GradleEnv, ClassFinder {
     }
 
     /**
-     * 请求非增量运行，必须在traverse时机之前调用
+     * 请求非增量运行，必须在traverse时机之前调用<br/>
+     * beforeTraverse及之前生命周期可调用，否则报RuntimeException<br/>
      */
     public void requestNotIncremental() {
-        if (running.get()) {
+        if (this.state.compareTo(State.RUNNING) >= 0) {
             throw new RuntimeException("You Should request for not incremental before traversing.");
         }
         this.isPluginIncremental = false;
         this.transformInputs.requestNotIncremental();
+    }
+
+    /**
+     * 请求某个文件进行非增量<br/>
+     * beforeTraverse及之前生命周期可调用，否则报RuntimeException<br/>
+     *
+     * @param relativePath 文件的相对路径,比如 com/bytedance/Demo.class
+     * @return 成功修改对应输入的状态，如果当前已经是非增量
+     */
+    public boolean requestNotIncremental(String relativePath) {
+        if (this.state.compareTo(State.RUNNING) >= 0) {
+            throw new RuntimeException("You Should request for not incremental before traversing.");
+        }
+        if (!this.isIncremental()) {
+            return false;
+        }
+        return this.transformInputs.requestNotIncremental(relativePath);
     }
 
     public boolean isReleaseBuild() {
@@ -187,16 +203,17 @@ public class TransformContext implements GradleEnv, ClassFinder {
 
     /**
      * 返回Transform的Graph缓存文件路径，增量编译需要读取和写入使用
-     *
-     * @return 缓存文件, 如果不支持增量，返回false
+     * <p>
+     * use AbsTransformFlow#getGraphCache instead
      */
+    @Deprecated
     public File getGraphCache() {
         return graphCacheFile;
     }
 
 
-    void markRunningState(boolean running) {
-        this.running.set(running);
+    synchronized void markRunningState(State state) {
+        this.state = state;
     }
 
     public void release() {
@@ -230,6 +247,23 @@ public class TransformContext implements GradleEnv, ClassFinder {
             return finder.loadClass(className);
         }
         return null;
+    }
+
+    public enum State implements Comparable<State> {
+        STATELESS,
+
+        INITIALIZING,
+        INITIALIZED,
+
+        INCREMENTALTRAVERSING,
+        BEFORETRAVERSE,
+
+        RUNNING,
+        TRAVERSING,
+        TRAVERSINGANDROID,
+        BEFORETRANSFORM,
+        TRANSFORMING,
+        AFTERTRANSFORM
     }
 }
 

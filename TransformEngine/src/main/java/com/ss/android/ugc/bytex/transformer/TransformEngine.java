@@ -28,12 +28,12 @@ public class TransformEngine {
     public TransformEngine(TransformContext context) {
         this.context = context;
     }
-    public void beginRun(){
-        context.markRunningState(false);
-    }
 
-    public void running(){
-        context.markRunningState(true);
+    /**
+     * call internal
+     */
+    public void markRunningState(TransformContext.State state) {
+        context.markRunningState(state);
     }
 
     public void transform(FileProcessor... processors) {
@@ -55,6 +55,18 @@ public class TransformEngine {
         worker.await();
     }
 
+    public void transformOutput() throws IOException {
+        Worker worker = Schedulers.IO();
+        context.allFiles()
+                .filter(fileCache -> !fileCache.isHasWritten())
+                .map(f -> (Callable<Void>) () -> {
+                    f.transformOutput();
+                    return null;
+                })
+                .forEach(worker::submit);
+        worker.await();
+    }
+
     public void traverseOnly(FileProcessor... processors) {
         Schedulers.FORKJOINPOOL().invoke(new PerformTraverseTask(context.allFiles(), getProcessorList(processors)));
     }
@@ -70,9 +82,6 @@ public class TransformEngine {
         return realProcessorList;
     }
 
-    public void endRun(){
-
-    }
     public TransformContext getContext() {
         return context;
     }

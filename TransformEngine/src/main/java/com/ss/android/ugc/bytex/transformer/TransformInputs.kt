@@ -3,8 +3,6 @@ package com.ss.android.ugc.bytex.transformer
 import com.android.build.api.transform.Status
 import com.android.build.api.transform.TransformInput
 import com.android.build.api.transform.TransformInvocation
-import com.android.build.gradle.internal.utils.toImmutableList
-import com.android.build.gradle.internal.utils.toImmutableMap
 import com.google.common.collect.Streams
 import com.google.gson.GsonBuilder
 import com.google.gson.TypeAdapter
@@ -14,6 +12,7 @@ import com.google.gson.stream.JsonToken
 import com.google.gson.stream.JsonWriter
 import com.ss.android.ugc.bytex.transformer.cache.*
 import com.ss.android.ugc.bytex.transformer.concurrent.Schedulers
+import com.ss.android.ugc.bytex.transformer.utils.getStack
 import java.io.*
 import java.util.*
 import java.util.concurrent.ConcurrentHashMap
@@ -68,7 +67,7 @@ class TransformInputs internal constructor(private val context: TransformContext
             }.forEach {
                 map[it.parent] = it.items.toSet()
             }
-            map.toImmutableMap()
+            Collections.unmodifiableMap(map)
         } finally {
             //用完即删
             cacheFile.delete()
@@ -85,7 +84,7 @@ class TransformInputs internal constructor(private val context: TransformContext
                 }
             }
         }
-        inputs.toImmutableMap()
+        Collections.unmodifiableMap(inputs)
     }
 
     val changedFiles by lazy {
@@ -116,9 +115,28 @@ class TransformInputs internal constructor(private val context: TransformContext
     }
 
     protected fun requestNotIncremental() {
-        transformInputs.flatMap { it.value }.parallelStream().forEach {
-            it.status = Status.ADDED
+        println("ByteX requestNotIncremental(${getCallStack()})")
+        transformInputs.flatMap { it.value }.forEach {
+            if (it.status == Status.NOTCHANGED) {
+                it.status = Status.CHANGED
+            }
         }
+    }
+
+    protected fun requestNotIncremental(relativePath: String): Boolean {
+        println("ByteX requestNotIncremental(${getCallStack()}):$relativePath")
+        var r = false
+        transformInputs.flatMap { it.value }.forEach {
+            if (it.relativePath == relativePath && it.status == Status.NOTCHANGED) {
+                it.status = Status.CHANGED
+                r = true
+            }
+        }
+        return r
+    }
+
+    private fun getCallStack(): String {
+        return getStack(1, "com.ss.android.ugc.bytex.transformer")
     }
 
     fun addFile(affinity: String, file: FileData) {
@@ -186,7 +204,7 @@ class TransformInputs internal constructor(private val context: TransformContext
                     }
                 }
                 `in`.endObject()
-                return Entry(parent!!, items!!.toImmutableList())
+                return Entry(parent!!, Collections.unmodifiableList(items!!))
             }
         }
     }

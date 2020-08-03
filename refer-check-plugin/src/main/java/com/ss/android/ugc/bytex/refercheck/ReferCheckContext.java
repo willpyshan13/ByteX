@@ -180,12 +180,17 @@ public class ReferCheckContext extends BaseContext<ReferCheckExtension> {
                 }).collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
     }
 
-    public void release() {
-        methodCache.release();
-        fieldCache.release();
+    public void releaseContext() {
+        super.releaseContext();
+        if (methodCache != null) {
+            methodCache.release();
+            methodCache = null;
+        }
+        if (fieldCache != null) {
+            fieldCache.release();
+            fieldCache = null;
+        }
         notAccessMethods.clear();
-        methodCache = null;
-        fieldCache = null;
     }
 
 }
