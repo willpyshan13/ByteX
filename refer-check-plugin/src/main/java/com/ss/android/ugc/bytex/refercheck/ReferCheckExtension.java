@@ -2,6 +2,7 @@ package com.ss.android.ugc.bytex.refercheck;
 
 import com.ss.android.ugc.bytex.common.BaseExtension;
 
+import java.util.ArrayList;
 import java.util.List;
 
 public class ReferCheckExtension extends BaseExtension {
@@ -9,7 +10,26 @@ public class ReferCheckExtension extends BaseExtension {
     private boolean strictMode;
     private boolean moreErrorInfo;
     private String owner;
-    private List<String> logMethods;
+    private boolean printKept = false;
+    private List<String> callBlockList = new ArrayList<>();
+
+    public List<String> getCallBlockList() {
+        return callBlockList;
+    }
+
+    public void setCallBlockList(List<String> callBlockList) {
+        this.callBlockList = callBlockList;
+    }
+
+    public boolean isCheckInaccessOverrideMethodStrictly() {
+        return checkInaccessOverrideMethodStrictly;
+    }
+
+    public void setCheckInaccessOverrideMethodStrictly(boolean checkInaccessOverrideMethodStrictly) {
+        this.checkInaccessOverrideMethodStrictly = checkInaccessOverrideMethodStrictly;
+    }
+
+    private boolean checkInaccessOverrideMethodStrictly = false;
 
     public void setWhiteList(List<String> list) {
         whiteList = list;
@@ -43,16 +63,16 @@ public class ReferCheckExtension extends BaseExtension {
         this.owner = owner;
     }
 
-    public List<String> getLogMethods() {
-        return logMethods;
-    }
-
-    public void setLogMethods(List<String> logMethods) {
-        this.logMethods = logMethods;
-    }
-
     @Override
     public String getName() {
         return "refer_check";
+    }
+
+    public boolean isPrintKept() {
+        return printKept;
+    }
+
+    public void setPrintKept(boolean printKept) {
+        this.printKept = printKept;
     }
 }

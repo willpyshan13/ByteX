@@ -1,4 +1,29 @@
 # Change Log
+### Version 0.2.7
+- Improve compatibility(AGP4.1) of GradleToolKit;
+- fix 'RuntimeClasspath was resolved from a thread not managed by Gradle' in getter-setter-plugin；
+- fix incremental
+
+### Version 0.2.6
+- fix bug in access-inline with coroutines[Issue](https://github.com/bytedance/ByteX/issues/31)
+- add quick-refer-check task:processQuickReferCheckWith${variant.capitalize}
+
+### Version 0.2.5
+- fix get applying variant scope(Compatible with AGP)
+
+### Version 0.2.4
+- fix APK with empty code on the higher version of AGP due to getScope
+- fix blocking compilation while calling getArtifact
+  > Note :This is an experimental bug fix.Need to enable the
+  > switch(bytex.forbidUseLenientMutationDuringGetArtifact) in
+  > gradle.properties manually
+- fix a badcase in access-inline-plugin
+
+### Version 0.2.3
+- use ASM6
+- remove usages of internal interfaces
+- configurable output with fixed timestamp
+
 ### Version 0.2.2
 - fix bugs:default transform configuration、NPE
 - optimize daemon cache with --no-daemon

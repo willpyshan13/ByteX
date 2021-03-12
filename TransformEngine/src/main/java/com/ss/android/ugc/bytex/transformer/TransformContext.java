@@ -12,6 +12,7 @@ import com.ss.android.ugc.bytex.transformer.cache.DirCache;
 import com.ss.android.ugc.bytex.transformer.cache.FileCache;
 import com.ss.android.ugc.bytex.transformer.cache.FileData;
 import com.ss.android.ugc.bytex.transformer.cache.JarCache;
+import com.ss.android.ugc.bytex.transformer.internal.TransformEnvWithNoLenientMutationImpl;
 import com.ss.android.ugc.bytex.transformer.io.ClassFinder;
 import com.ss.android.ugc.bytex.transformer.io.ClassNodeLoader;
 import com.ss.android.ugc.bytex.transformer.location.Locator;
@@ -19,6 +20,7 @@ import com.ss.android.ugc.bytex.transformer.utils.Service;
 
 import org.gradle.api.Project;
 import org.gradle.api.internal.project.ProjectInternal;
+import org.gradle.internal.service.UnknownServiceException;
 import org.gradle.launcher.daemon.server.scaninfo.DaemonScanInfo;
 import org.objectweb.asm.tree.ClassNode;
 
@@ -40,38 +42,54 @@ public class TransformContext implements GradleEnv, ClassFinder {
     private TransformOutputs transformOutputs;
     protected Project project;
     protected AppExtension android;
-    private boolean isPluginIncremental;
-    private boolean shouldSaveCache;
+    private TransformOptions transformOptions;
+    private boolean hasRequestNotIncremental = false;
     private File graphCacheFile;
     private String temporaryDirName;
     private ClassFinder finder;
     private State state = State.STATELESS;
 
+    @Deprecated
     public TransformContext(TransformInvocation invocation, Project project, AppExtension android, boolean isPluginIncremental) {
         this(invocation, project, android, isPluginIncremental, true);
     }
 
+    @Deprecated
     public TransformContext(TransformInvocation invocation, Project project, AppExtension android, boolean isPluginIncremental, boolean shouldSaveCache) {
         this(invocation, project, android, isPluginIncremental, shouldSaveCache, false);
     }
 
+    @Deprecated
     public TransformContext(TransformInvocation invocation, Project project, AppExtension android, boolean isPluginIncremental, boolean shouldSaveCache, boolean useRawCache) {
+        this(invocation,
+                project,
+                android,
+                new TransformOptions.Builder()
+                        .setPluginIncremental(isPluginIncremental)
+                        .setShouldSaveCache(shouldSaveCache)
+                        .setUseRawCache(useRawCache).build()
+        );
+    }
+
+    public TransformContext(TransformInvocation invocation, Project project, AppExtension android, TransformOptions transformOptions) {
         this.invocation = invocation;
         this.project = project;
         this.android = android;
-        this.isPluginIncremental = isPluginIncremental;
+        this.transformOptions = transformOptions;
         this.transformEnv = Service.load(TransformEnv.class);
         if (transformEnv != null) {
+            if (transformOptions.isForbidUseLenientMutationDuringGetArtifact()) {
+                transformEnv = new TransformEnvWithNoLenientMutationImpl(transformEnv);
+            }
             transformEnv.setTransformInvocation(invocation);
         }
         temporaryDirName = invocation.getContext().getTemporaryDir().getName();
         temporaryDirName = temporaryDirName.replace("transformClassesAndResourcesWith", "");
         temporaryDirName = temporaryDirName.replace("transformClassesWith", "");
         graphCacheFile = new File(byteXBuildDir(), "graphCache.json");
-        this.shouldSaveCache = shouldSaveCache;
         this.locator = new Locator(this);
-        this.transformOutputs = new TransformOutputs(this, invocation, new File(byteXBuildDir(), "outputs.txt"), isPluginIncremental, shouldSaveCache, !isDaemonSingleUse() && useRawCache);
-        this.transformInputs = new TransformInputs(this, invocation, new File(byteXBuildDir(), "inputs.txt"), isPluginIncremental, shouldSaveCache, !isDaemonSingleUse() && useRawCache);
+        this.transformOutputs = new TransformOutputs(this, invocation, new File(byteXBuildDir(), "outputs.txt"), transformOptions);
+        this.transformInputs = new TransformInputs(this, invocation, new File(byteXBuildDir(), "inputs.txt"), transformOptions);
         this.finder = new ClassNodeLoader(this);
     }
 
@@ -112,11 +130,15 @@ public class TransformContext implements GradleEnv, ClassFinder {
     }
 
     public boolean isIncremental() {
-        return invocation.isIncremental() && isPluginIncremental;
+        return invocation.isIncremental() && getTransformOptions().isPluginIncremental() && !hasRequestNotIncremental;
     }
 
     public boolean shouldSaveCache() {
-        return shouldSaveCache;
+        return getTransformOptions().isShouldSaveCache();
+    }
+
+    public TransformOptions getTransformOptions() {
+        return transformOptions;
     }
 
     /**
@@ -130,8 +152,8 @@ public class TransformContext implements GradleEnv, ClassFinder {
         if (!this.isIncremental()) {
             return;
         }
-        this.isPluginIncremental = false;
         this.transformInputs.requestNotIncremental();
+        hasRequestNotIncremental = true;
     }
 
     /**
@@ -168,16 +190,11 @@ public class TransformContext implements GradleEnv, ClassFinder {
     }
 
     public File androidJar() throws FileNotFoundException {
-        File jar = new File(getSdkJarDir(), "android.jar");
-        if (!jar.exists()) {
+        File jar = transformOptions.getAndroidJarProvider().getAndroidJar(project, android);
+        if (jar == null || !jar.exists()) {
             throw new FileNotFoundException("Android jar not found!");
         }
         return jar;
-    }
-
-    private String getSdkJarDir() {
-        String compileSdkVersion = android.getCompileSdkVersion();
-        return String.join(File.separator, android.getSdkDirectory().getAbsolutePath(), "platforms", compileSdkVersion);
     }
 
     public File byteXBuildDir() {
@@ -228,7 +245,12 @@ public class TransformContext implements GradleEnv, ClassFinder {
      * @return true 表示构建结束后会被杀死，类似于--no-daemon
      */
     public boolean isDaemonSingleUse() {
-        return ((ProjectInternal) project).getServices().get(DaemonScanInfo.class).isSingleUse();
+        try {
+            return ((ProjectInternal) project).getServices().get(DaemonScanInfo.class).isSingleUse();
+        } catch (UnknownServiceException e) {
+            e.printStackTrace();
+            return false;
+        }
     }
 
     public void release() {
@@ -245,7 +267,9 @@ public class TransformContext implements GradleEnv, ClassFinder {
         android = null;
         graphCacheFile = null;
         temporaryDirName = null;
+        transformOptions = null;
         finder = null;
+        hasRequestNotIncremental = false;
     }
 
     @Override
